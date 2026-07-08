@@ -1,6 +1,11 @@
 node_modules/
-data/
-public/uploads/
 .DS_Store
 *.log
 npm-debug.log*
+
+# Data folder (akan dibuat otomatis saat first run)
+# Uncomment di bawah kalau mau include sample db.json:
+# data/db.json
+
+# Uploads folder tetap ada via .gitkeep
+# public/uploads/ — folder exists, tapi file uploads diabaikan
