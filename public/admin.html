@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Admin — Satria Toko Emas</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body class="admin">
+  <!-- Login -->
+  <div id="loginView" class="login-view">
+    <form class="login-box" id="loginForm">
+      <div class="logo-badge small">
+        <img src="/logo.png" alt="Satria Toko Emas" class="login-logo" />
+      </div>
+      <h1>Admin Login</h1>
+      <input type="password" id="password" placeholder="Password" required />
+      <button type="submit">Masuk</button>
+      <p class="error" id="loginError"></p>
+    </form>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="dashView" class="dash" hidden>
+    <header class="dash-head">
+      <h1>Panel Admin — Satria Toko Emas</h1>
+      <div>
+        <a href="/" target="_blank">Lihat Tampilan</a>
+        <button id="logoutBtn">Logout</button>
+      </div>
+    </header>
+
+    <div class="dash-grid">
+      <!-- Harga -->
+      <section class="card">
+        <h2>Harga Emas Hari Ini</h2>
+        <table class="admin-table" id="priceTable">
+          <thead>
+            <tr><th>KADAR</th><th>Harga Beli</th><th>Harga Jual</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="add-karat">
+          <input id="newKarat" placeholder="Tambah kadar (mis. 18K)" />
+          <button id="addKaratBtn">+ Tambah</button>
+        </div>
+        <button class="primary" id="savePricesBtn">Simpan Harga</button>
+        <span class="saved" id="priceSaved"></span>
+      </section>
+
+      <!-- Banner -->
+      <section class="card">
+        <h2>Foto / Banner</h2>
+        <div class="upload">
+          <input type="file" id="bannerFile" accept="image/*" />
+          <button id="uploadBtn">Upload</button>
+        </div>
+        <p class="hint">Rasio foto otomatis diseragamkan saat tampil.</p>
+        <div class="banner-grid" id="bannerList"></div>
+      </section>
+
+      <!-- Pengaturan -->
+      <section class="card wide">
+        <h2>Pengaturan</h2>
+        <div class="settings-row">
+          <label>Nama Toko<input id="storeName" /></label>
+          <label>Interval Banner (detik)<input id="interval" type="number" min="2" /></label>
+        </div>
+        <button class="primary" id="saveSettingsBtn">Simpan Pengaturan</button>
+        <span class="saved" id="settingsSaved"></span>
+      </section>
+    </div>
+  </div>
+
+  <script src="/admin.js"></script>
+</body>
+</html>
