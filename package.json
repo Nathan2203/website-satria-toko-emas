@@ -10,8 +10,6 @@
   "dependencies": {
     "express": "^4.19.2",
     "express-session": "^1.18.0",
-    "multer": "^2.2.0",
-    "mongoose": "^8.9.5",
-    "connect-mongo": "^5.1.0"
+    "multer": "^2.2.0"
   }
 }

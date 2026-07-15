@@ -1,13 +1,12 @@
 /**
  * Satria Toko Emas — Gold Price Display backend.
- * Express + MongoDB Atlas (data) + GridFS (banner images).
+ * Express + JSON file storage. No external database required.
  */
 const express = require('express');
 const session = require('express-session');
-const MongoStore = require('connect-mongo');
 const multer = require('multer');
-const mongoose = require('mongoose');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 
@@ -15,44 +14,49 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 const SESSION_SECRET = process.env.SESSION_SECRET || 'please-change-this-secret';
-const MONGODB_URI = process.env.MONGODB_URI;
 
-if (!MONGODB_URI) {
-  console.error('\n  ERROR: MONGODB_URI belum di-set di environment variable.');
-  console.error('  Buat cluster gratis di https://www.mongodb.com/cloud/atlas lalu set MONGODB_URI.\n');
-  process.exit(1);
+const DATA_DIR = path.join(__dirname, 'data');
+const DATA_FILE = path.join(DATA_DIR, 'db.json');
+const UPLOAD_DIR = path.join(__dirname, 'public', 'uploads');
+
+// ----- Ensure folders exist -----
+for (const dir of [DATA_DIR, UPLOAD_DIR]) {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
 
-mongoose.connect(MONGODB_URI)
-  .then(() => console.log('  MongoDB connected'))
-  .catch(err => { console.error('  MongoDB connection error:', err.message); process.exit(1); });
+// ----- Default data (created on first run) -----
+const DEFAULT_DATA = {
+  storeName: 'SATRIA TOKO EMAS',
+  bannerIntervalMs: 5000,
+  banners: [],                          // [{ id, filename }]
+  karats: ['6K', '8K', '9K', '16K', '17K'],
+  prices: {},                           // { '6K': { buy, sell }, ... }
+  history: [],                          // [{ ts, prices }]
+};
 
-// GridFS bucket untuk simpan foto banner (bukan di disk, supaya tidak hilang saat redeploy)
-let gridBucket;
-mongoose.connection.once('open', () => {
-  gridBucket = new mongoose.mongo.GridFSBucket(mongoose.connection.db, { bucketName: 'banners' });
-});
-
-// ----- Schema: satu dokumen menyimpan semua data toko -----
-const storeSchema = new mongoose.Schema({
-  storeName: { type: String, default: 'SATRIA TOKO EMAS' },
-  bannerIntervalMs: { type: Number, default: 5000 },
-  banners: [{ id: String, filename: String }],           // filename = GridFS file id (string)
-  karats: { type: [String], default: ['6K', '8K', '9K', '16K', '17K'] },
-  prices: { type: mongoose.Schema.Types.Mixed, default: {} },
-  history: [{ ts: String, prices: mongoose.Schema.Types.Mixed }],
-});
-const Store = mongoose.model('Store', storeSchema);
-
-async function loadData() {
-  let doc = await Store.findOne();
-  if (!doc) doc = await Store.create({});
-  return doc;
+// ----- Tiny JSON data layer -----
+function loadData() {
+  try {
+    return { ...DEFAULT_DATA, ...JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8')) };
+  } catch {
+    saveData(DEFAULT_DATA);
+    return { ...DEFAULT_DATA };
+  }
+}
+function saveData(data) {
+  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2));
 }
 
-// ----- Multer: simpan file di memory, lalu di-stream ke GridFS -----
+// ----- Multer: image uploads -----
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, UPLOAD_DIR),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `banner_${Date.now()}${ext}`);
+  },
+});
 const upload = multer({
-  storage: multer.memoryStorage(),
+  storage,
   limits: { fileSize: 8 * 1024 * 1024 }, // 8 MB
   fileFilter: (req, file, cb) => {
     const ok = /image\/(jpe?g|png|webp|gif)/.test(file.mimetype);
@@ -66,7 +70,6 @@ app.use(session({
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
-  store: MongoStore.create({ mongoUrl: MONGODB_URI }),
   cookie: { maxAge: 1000 * 60 * 60 * 8 }, // 8 hours
 }));
 app.use(express.static(path.join(__dirname, 'public')));
@@ -77,8 +80,8 @@ function requireAdmin(req, res, next) {
 }
 
 // ===================== PUBLIC API =====================
-app.get('/api/data', async (req, res) => {
-  const d = await loadData();
+app.get('/api/data', (req, res) => {
+  const d = loadData();
   res.json({
     storeName: d.storeName,
     bannerIntervalMs: d.bannerIntervalMs,
@@ -89,21 +92,8 @@ app.get('/api/data', async (req, res) => {
   });
 });
 
-app.get('/api/history', async (req, res) => {
-  res.json((await loadData()).history);
-});
-
-// Serve foto banner langsung dari GridFS (bukan folder statis)
-app.get('/uploads/:id', (req, res) => {
-  if (!gridBucket) return res.status(503).end();
-  try {
-    const fileId = new mongoose.Types.ObjectId(req.params.id);
-    gridBucket.openDownloadStream(fileId)
-      .on('error', () => res.status(404).end())
-      .pipe(res);
-  } catch {
-    res.status(404).end();
-  }
+app.get('/api/history', (req, res) => {
+  res.json(loadData().history);
 });
 
 // ===================== AUTH =====================
@@ -124,6 +114,7 @@ app.get('/api/admin/me', (req, res) => {
 });
 
 // ===================== ADMIN: BANNERS =====================
+// Terjemahkan error multer menjadi pesan Bahasa Indonesia yang jelas.
 function uploadErrorMessage(err) {
   if (err.code === 'LIMIT_FILE_SIZE') return 'Ukuran foto melebihi batas maksimal 8 MB';
   if (err.message === 'Only image files are allowed') return 'Hanya file gambar (JPG, PNG, WEBP, GIF) yang diperbolehkan';
@@ -131,70 +122,61 @@ function uploadErrorMessage(err) {
 }
 
 app.post('/api/admin/banners', requireAdmin, (req, res) => {
-  upload.single('image')(req, res, async (err) => {
+  // Panggil multer manual agar error (mis. file > 8 MB) bisa dikirim sebagai JSON,
+  // bukan halaman error 500 default Express yang tidak bisa dibaca frontend.
+  upload.single('image')(req, res, (err) => {
     if (err) return res.status(400).json({ error: uploadErrorMessage(err) });
     if (!req.file) return res.status(400).json({ error: 'Tidak ada file yang dipilih' });
-    if (!gridBucket) return res.status(503).json({ error: 'Database belum siap, coba lagi sebentar' });
-
-    const uploadStream = gridBucket.openUploadStream(req.file.originalname, {
-      contentType: req.file.mimetype,
-    });
-    uploadStream.end(req.file.buffer);
-    uploadStream.on('finish', async () => {
-      const d = await loadData();
-      const banner = { id: uploadStream.id.toString(), filename: uploadStream.id.toString() };
-      d.banners.push(banner);
-      await d.save();
-      res.json(banner);
-    });
-    uploadStream.on('error', () => res.status(500).json({ error: 'Upload gagal' }));
+    const d = loadData();
+    const banner = { id: Date.now().toString(), filename: req.file.filename };
+    d.banners.push(banner);
+    saveData(d);
+    res.json(banner);
   });
 });
 
-app.delete('/api/admin/banners/:id', requireAdmin, async (req, res) => {
-  const d = await loadData();
+app.delete('/api/admin/banners/:id', requireAdmin, (req, res) => {
+  const d = loadData();
   const banner = d.banners.find(b => b.id === req.params.id);
   if (banner) {
-    try { await gridBucket.delete(new mongoose.Types.ObjectId(banner.filename)); } catch { /* file mungkin sudah terhapus */ }
+    const fp = path.join(UPLOAD_DIR, banner.filename);
+    if (fs.existsSync(fp)) fs.unlinkSync(fp);
     d.banners = d.banners.filter(b => b.id !== req.params.id);
-    await d.save();
+    saveData(d);
   }
   res.json({ ok: true });
 });
 
 // ===================== ADMIN: KARATS =====================
-app.put('/api/admin/karats', requireAdmin, async (req, res) => {
+app.put('/api/admin/karats', requireAdmin, (req, res) => {
   const { karats } = req.body;
-  const d = await loadData();
+  const d = loadData();
   d.karats = karats;
-  const prices = d.prices || {};
-  for (const k of Object.keys(prices)) {
-    if (!karats.includes(k)) delete prices[k]; // prune removed karats
+  for (const k of Object.keys(d.prices)) {
+    if (!karats.includes(k)) delete d.prices[k]; // prune removed karats
   }
-  d.prices = prices;
-  d.markModified('prices');
-  await d.save();
+  saveData(d);
   res.json({ ok: true, karats: d.karats });
 });
 
 // ===================== ADMIN: PRICES =====================
-app.put('/api/admin/prices', requireAdmin, async (req, res) => {
+app.put('/api/admin/prices', requireAdmin, (req, res) => {
   const { prices } = req.body; // { '6K': { buy, sell }, ... }
-  const d = await loadData();
+  const d = loadData();
   d.prices = prices;
   d.history.push({ ts: new Date().toISOString(), prices });
   if (d.history.length > 365) d.history = d.history.slice(-365); // bound history
-  await d.save();
+  saveData(d);
   res.json({ ok: true });
 });
 
 // ===================== ADMIN: SETTINGS =====================
-app.put('/api/admin/settings', requireAdmin, async (req, res) => {
+app.put('/api/admin/settings', requireAdmin, (req, res) => {
   const { storeName, bannerIntervalMs } = req.body;
-  const d = await loadData();
+  const d = loadData();
   if (storeName !== undefined) d.storeName = storeName;
   if (bannerIntervalMs !== undefined) d.bannerIntervalMs = Number(bannerIntervalMs);
-  await d.save();
+  saveData(d);
   res.json({ ok: true });
 });
 
